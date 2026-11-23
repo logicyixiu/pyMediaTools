@@ -2,11 +2,13 @@ from PySide6.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel,
                                QComboBox, QSlider, QGroupBox, QSizePolicy, 
                                QCheckBox, QTabWidget, QScrollArea, QFrame,
                                QDialog, QDialogButtonBox, QGridLayout, QWidget,
-                               QLineEdit, QPushButton, QMessageBox, QFileDialog, QInputDialog)
+                               QLineEdit, QPushButton, QMessageBox, QFileDialog,
+                               QInputDialog, QSpinBox, QDoubleSpinBox)
 from PySide6.QtCore import Qt, QSettings, QUrl
 from PySide6.QtGui import QFont
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
+from .styles import apply_common_style
 from .elevenlabs_widgets import SubtitlePreviewLabel
 from .elevenlabs_style_panel import SubtitleStylePanel
 from ..core.elevenlabs import (LibrarySearchWorker, LibraryAddWorker)
@@ -182,7 +184,7 @@ class VoiceSettingsDialog(QDialog):
                 if idx >= 0: self.combo_language.setCurrentIndex(idx)
 
 class SubtitleSettingsDialog(QDialog):
-    """字幕设置对话框 - 整合 Groq 配置和 XML 样式设置"""
+    """字幕设置对话框 - 整合 Groq 配置、视频分段设置和 XML 样式设置"""
     def __init__(self, parent=None, xml_styles=None, video_settings=None, groq_settings=None):
         super().__init__(parent)
         self.setWindowTitle("字幕设置")
@@ -191,15 +193,24 @@ class SubtitleSettingsDialog(QDialog):
         
         self.parent_widget = parent
         self.xml_styles = xml_styles or {}
-        self.video_settings = video_settings or {}
-        self.groq_settings = groq_settings or {'api_key': '', 'model': 'openai/gpt-oss-120b'}
+        self.video_settings = dict(video_settings) if video_settings else {
+            'fps': 30,
+            'width': 1080,
+            'height': 1920,
+            'srt_pause_threshold': 0.2,
+            'srt_max_chars': 40,
+        }
+        self.groq_settings = dict(groq_settings) if groq_settings else {
+            'api_key': '',
+            'model': 'openai/gpt-oss-120b',
+        }
         
         self.groq_qsettings = QSettings("pyMediaTools", "Groq")
         
         self.setup_ui()
+        apply_common_style(self)
     
     def setup_ui(self):
-        from PySide6.QtWidgets import QLineEdit
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.setContentsMargins(15, 15, 15, 15)
@@ -223,17 +234,64 @@ class SubtitleSettingsDialog(QDialog):
         self.txt_api_key = QLineEdit()
         self.txt_api_key.setPlaceholderText("在此输入你的 Groq API Key")
         self.txt_api_key.setEchoMode(QLineEdit.Password)
-        self.txt_api_key.setText(self.groq_qsettings.value("api_key", ""))
+        initial_key = self.groq_settings.get("api_key") or self.groq_qsettings.value("api_key", "")
+        self.txt_api_key.setText(str(initial_key))
         groq_layout.addWidget(QLabel("API Key:"))
         groq_layout.addWidget(self.txt_api_key)
         
         self.txt_groq_model = QLineEdit()
         self.txt_groq_model.setPlaceholderText("openai/gpt-oss-120b")
-        self.txt_groq_model.setText(self.groq_qsettings.value("model", "openai/gpt-oss-120b"))
+        initial_model = self.groq_settings.get("model") or self.groq_qsettings.value("model", "openai/gpt-oss-120b")
+        self.txt_groq_model.setText(str(initial_model))
         groq_layout.addWidget(QLabel("分析模型:"))
         groq_layout.addWidget(self.txt_groq_model)
         
         gen_layout.addWidget(groq_group)
+
+        # 视频与字幕分段设置
+        video_group = QGroupBox("视频与字幕分段设置 (FCPXML & SRT)")
+        video_grid = QGridLayout(video_group)
+        video_grid.setSpacing(10)
+
+        self.combo_res = QComboBox()
+        self.combo_res.addItems(["1080p (1920x1080)", "2K (2560x1440)", "4K (3840x2160)"])
+        cur_w = int(self.video_settings.get("width", 1080))
+        cur_h = int(self.video_settings.get("height", 1920))
+        max_dim = max(cur_w, cur_h)
+        if max_dim >= 3840:
+            self.combo_res.setCurrentIndex(2)
+        elif max_dim >= 2560:
+            self.combo_res.setCurrentIndex(1)
+        else:
+            self.combo_res.setCurrentIndex(0)
+
+        self.chk_vertical = QCheckBox("竖屏 (9:16)")
+        self.chk_vertical.setChecked(cur_h > cur_w)
+
+        self.combo_fps = QComboBox()
+        self.combo_fps.addItems(["24", "25", "30", "50", "60"])
+        self.combo_fps.setCurrentText(str(self.video_settings.get("fps", 30)))
+
+        self.spin_max_chars = QSpinBox()
+        self.spin_max_chars.setRange(10, 120)
+        self.spin_max_chars.setValue(int(self.video_settings.get("srt_max_chars", 40)))
+
+        self.spin_pause_threshold = QDoubleSpinBox()
+        self.spin_pause_threshold.setRange(0.05, 2.0)
+        self.spin_pause_threshold.setSingleStep(0.05)
+        self.spin_pause_threshold.setValue(float(self.video_settings.get("srt_pause_threshold", 0.2)))
+
+        video_grid.addWidget(QLabel("分辨率:"), 0, 0)
+        video_grid.addWidget(self.combo_res, 0, 1)
+        video_grid.addWidget(self.chk_vertical, 0, 2)
+        video_grid.addWidget(QLabel("帧率 (FPS):"), 1, 0)
+        video_grid.addWidget(self.combo_fps, 1, 1)
+        video_grid.addWidget(QLabel("单行最大字符数:"), 2, 0)
+        video_grid.addWidget(self.spin_max_chars, 2, 1)
+        video_grid.addWidget(QLabel("停顿断句阈值 (秒):"), 3, 0)
+        video_grid.addWidget(self.spin_pause_threshold, 3, 1)
+
+        gen_layout.addWidget(video_group)
         gen_layout.addStretch()
         
         self.tabs.addTab(self.general_tab, "常规设置")
@@ -281,11 +339,47 @@ class SubtitleSettingsDialog(QDialog):
     def on_tab_changed(self, index):
         self.preview_group.setVisible(index > 0)
         self.refresh_style_preview()
+
+    def get_groq_settings(self) -> dict:
+        """返回更新后的 Groq 配置字典。"""
+        api_key = self.txt_api_key.text().strip()
+        model = self.txt_groq_model.text().strip() or "openai/gpt-oss-120b"
+        self.groq_settings["api_key"] = api_key
+        self.groq_settings["model"] = model
+        return dict(self.groq_settings)
+
+    def get_video_settings(self) -> dict:
+        """返回更新后的视频与字幕分段配置字典。"""
+        preset = self.combo_res.currentText()
+        if "4K" in preset:
+            w, h = 3840, 2160
+        elif "2K" in preset:
+            w, h = 2560, 1440
+        else:
+            w, h = 1920, 1080
+
+        if self.chk_vertical.isChecked():
+            w, h = h, w
+
+        try:
+            fps = int(self.combo_fps.currentText())
+        except (ValueError, TypeError):
+            fps = 30
+
+        self.video_settings.update({
+            "fps": fps,
+            "width": w,
+            "height": h,
+            "srt_max_chars": self.spin_max_chars.value(),
+            "srt_pause_threshold": round(self.spin_pause_threshold.value(), 2),
+        })
+        return dict(self.video_settings)
             
     def save_and_accept(self):
-        # Save Groq settings to QSettings
-        self.groq_qsettings.setValue("api_key", self.txt_api_key.text().strip())
-        self.groq_qsettings.setValue("model", self.txt_groq_model.text().strip())
+        groq_cfg = self.get_groq_settings()
+        self.groq_qsettings.setValue("api_key", groq_cfg["api_key"])
+        self.groq_qsettings.setValue("model", groq_cfg["model"])
+        self.get_video_settings()
         self.accept()
 
 

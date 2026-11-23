@@ -87,6 +87,27 @@ class TestElevenLabsWidget(unittest.TestCase):
                 widget.deleteLater()
                 ensure_qapp().processEvents()
 
+    def test_subtitle_settings_dialog_getters_and_accept(self):
+        from pyMediaTools.ui.elevenlabs_dialogs import SubtitleSettingsDialog
+        from PySide6.QtWidgets import QDialog
+
+        widget = ElevenLabsWidget()
+        try:
+            with patch.object(SubtitleSettingsDialog, "exec", return_value=QDialog.Accepted):
+                widget.open_subtitle_settings()
+                self.assertIn("api_key", widget.groq_settings)
+                self.assertIn("model", widget.groq_settings)
+                self.assertIn("fps", widget.video_settings)
+                self.assertIn("width", widget.video_settings)
+                self.assertIn("height", widget.video_settings)
+                self.assertIn("srt_max_chars", widget.video_settings)
+                self.assertIn("srt_pause_threshold", widget.video_settings)
+        finally:
+            widget.cleanup()
+            widget.close()
+            widget.deleteLater()
+            ensure_qapp().processEvents()
+
 
 if __name__ == "__main__":
     unittest.main()
